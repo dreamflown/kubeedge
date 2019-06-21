@@ -43,6 +43,8 @@ var (
 	TwinETCloudSyncSuffix = "/twin/cloud_updated"
 	//TwinETEdgeSyncSuffix the topic suffix for twin sync event
 	TwinETEdgeSyncSuffix = "/twin/edge_updated"
+	//DeviceETUpdatedSuffix the topic suffix for device create request event
+	DeviceETCreateSuffix = "/create"
 	//DeviceETUpdatedSuffix the topic suffix for device updated event
 	DeviceETUpdatedSuffix = "/updated"
 	//DeviceETStateUpdateSuffix the topic suffix for device state update event

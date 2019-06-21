@@ -13,6 +13,7 @@ const (
 	ResourceDeviceIDIndex       = 3
 	ResourceNode                = "node"
 	ResourceDevice              = "device"
+	ResourceTwin                = "twin"
 	ResourceTypeTwinEdgeUpdated = "twin/edge_updated"
 	ResourceDeviceStateUpdate   = "led-light-instance-01"
 

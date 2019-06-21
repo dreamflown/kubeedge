@@ -41,6 +41,10 @@ type DeviceState struct {
 	State v1alpha1.DeviceState `json:"state"`
 }
 
+type DeviceInstance struct {
+	v1alpha1.Device `yaml:"Device"`
+}
+
 const (
 	// MergePatchType is patch type
 	MergePatchType = "application/merge-patch+json"
@@ -50,17 +54,19 @@ const (
 
 // UpstreamController subscribe messages from edge and sync to k8s api server
 type UpstreamController struct {
-	crdClient             *rest.RESTClient
-	messageLayer          messagelayer.MessageLayer
-	stopUpdateDeviceState chan struct{}
+	crdClient    *rest.RESTClient
+	messageLayer messagelayer.MessageLayer
 
 	// stop channel
-	stopDispatch           chan struct{}
-	stopUpdateDeviceStatus chan struct{}
+	stopDispatch             chan struct{}
+	stopUpdateDeviceStatus   chan struct{}
+	stopUpdateDeviceState    chan struct{}
+	stopCreateDeviceInstance chan struct{}
 
 	// message channel
-	deviceStatusChan chan model.Message
-	deviceStateChan  chan model.Message
+	deviceStatusChan   chan model.Message
+	deviceStateChan    chan model.Message
+	deviceInstanceChan chan model.Message
 
 	// downstream controller to update device status in cache
 	dc *DownstreamController
@@ -75,12 +81,14 @@ func (uc *UpstreamController) Start() error {
 
 	uc.deviceStatusChan = make(chan model.Message, config.UpdateDeviceStatusBuffer)
 	uc.deviceStateChan = make(chan model.Message, config.UpdateDeviceStatusBuffer)
+	uc.deviceInstanceChan = make(chan model.Message, config.UpdateDeviceStatusBuffer)
 
 	go uc.dispatchMessage(uc.stopDispatch)
 
 	for i := 0; i < config.UpdateDeviceStatusWorkers; i++ {
 		go uc.updateDeviceStatus(uc.stopUpdateDeviceStatus)
 		go uc.UpdateDeviceState(uc.stopUpdateDeviceState)
+		go uc.CreateDeviceInstance(uc.stopCreateDeviceInstance)
 	}
 
 	return nil
@@ -110,10 +118,12 @@ func (uc *UpstreamController) dispatchMessage(stop chan struct{}) {
 		log.LOGGER.Infof("Message: %s, resource type is: %s", msg.GetID(), resourceType)
 
 		switch resourceType {
-		case constants.ResourceDeviceStateUpdate:
+		case constants.ResourceNode:
 			uc.deviceStateChan <- msg
 		case constants.ResourceTypeTwinEdgeUpdated:
 			uc.deviceStatusChan <- msg
+		case constants.ResourceDevice:
+			uc.deviceInstanceChan <- msg
 		default:
 			log.LOGGER.Warnf("Message: %s, with resource type: %s not intended for device controller", msg.GetID(), resourceType)
 		}
@@ -206,6 +216,8 @@ func (uc *UpstreamController) UpdateDeviceState(stop chan struct{}) {
 			device, ok := uc.dc.deviceManager.Device.Load(deviceID)
 			if !ok {
 				log.LOGGER.Warnf("Device %s does not exist in downstream controller", deviceID)
+				log.LOGGER.Infof("Create instance of device %s ", deviceID)
+				uc.deviceInstanceChan <- msg
 				continue
 			}
 			cacheDeviceState, ok := device.(*CacheDevice)
@@ -226,6 +238,34 @@ func (uc *UpstreamController) UpdateDeviceState(stop chan struct{}) {
 			result := uc.crdClient.Patch(MergePatchType).Namespace(cacheDeviceState.Namespace).Resource(ResourceTypeDevices).Name(deviceID).Body(body).Do()
 			if result.Error() != nil {
 				log.LOGGER.Errorf("Failed to patch device status %v of device %v in namespace %v", deviceState, deviceID, cacheDeviceState.Namespace)
+				continue
+			}
+			log.LOGGER.Infof("Message: %s process successfully", msg.GetID())
+		case <-stop:
+			log.LOGGER.Infof("Stop updateDeviceStatus")
+			running = false
+		}
+	}
+}
+
+func (uc *UpstreamController) CreateDeviceInstance(stop chan struct{}) {
+	running := true
+	for running {
+		select {
+		case msg := <-uc.deviceInstanceChan:
+			log.LOGGER.Infof("Message: %s, operation is: %s, and resource is: %s", msg.GetID(), msg.GetOperation(), msg.GetResource())
+			instance, err := uc.unmarshalDeviceInstanceMessage(msg)
+			if err != nil {
+				log.LOGGER.Warnf("Unmarshall failed due to error %v", err)
+				continue
+			}
+			if instance.Namespace == "" {
+				instance.SetNamespace("default")
+			}
+			body, err := json.Marshal(instance)
+			result := uc.crdClient.Post().Namespace(instance.Namespace).Resource(ResourceTypeDevices).Body(instance).Body(body).Do()
+			if result.Error() != nil {
+				log.LOGGER.Errorf("Failed to create device instance %v of device %v in namespace %v", instance, instance.Name, instance.Namespace)
 				continue
 			}
 			log.LOGGER.Infof("Message: %s process successfully", msg.GetID())
@@ -264,6 +304,20 @@ func (uc *UpstreamController) unmarshalDeviceStatusMessage(msg model.Message) (*
 		return nil, err
 	}
 	return twinUpdate, nil
+}
+
+func (uc *UpstreamController) unmarshalDeviceInstanceMessage(msg model.Message) (*v1alpha1.Device, error) {
+	content := msg.GetContent()
+	device := &v1alpha1.Device{}
+	bytes, err := json.Marshal(content)
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal(bytes, device)
+	if err != nil {
+		return nil, err
+	}
+	return device, nil
 }
 
 // Stop UpstreamController

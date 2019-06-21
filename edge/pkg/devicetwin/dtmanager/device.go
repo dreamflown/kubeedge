@@ -3,6 +3,8 @@ package dtmanager
 import (
 	"encoding/json"
 	"errors"
+	"github.com/kubeedge/kubeedge/cloud/pkg/devicecontroller/apis/devices/v1alpha1"
+	"github.com/kubeedge/kubeedge/keadm/app/cmd/util"
 	"strings"
 	"time"
 
@@ -78,6 +80,7 @@ func dealDeviceStateUpdate(context *dtcontext.DTContext, resource string, msg in
 	context.Lock(deviceID)
 	doc, docExist := context.DeviceList.Load(deviceID)
 	if !docExist {
+		go DeviceInstanceCreate(context, resource, msg)
 		return nil, nil
 	}
 	device, ok := doc.(*dttype.Device)
@@ -136,6 +139,52 @@ func dealDeviceUpdated(context *dtcontext.DTContext, resource string, msg interf
 	DeviceUpdated(context, deviceID, updateDevice.Attributes, dttype.BaseMessage{EventID: updateDevice.EventID}, 0)
 	context.Unlock(deviceID)
 	return nil, nil
+}
+
+func DeviceInstanceCreate(context *dtcontext.DTContext, deviceID string, msg interface{}) error {
+	message, ok := msg.(*model.Message)
+	if !ok {
+		return errors.New("msg not Message type")
+	}
+
+	twins, err := dttype.UnmarshalDeviceTwinUpdate(message.Content.([]byte))
+
+	device := new(v1alpha1.Device)
+	// meteType
+	model := context.Attributes["model"].Value
+	labels := map[string]string{"model": model}
+	device.SetLabels(labels)
+	device.Name = deviceID
+
+	// spec
+	spec := v1alpha1.DeviceSpec{}
+	spec.DeviceModelRef.Name = model
+	//spec.NodeSelector.NodeSelectorTerms[0].MatchExpressions[0].Key = ""
+	spec.NodeSelector.NodeSelectorTerms[0].MatchExpressions[0].Operator = "In"
+	spec.NodeSelector.NodeSelectorTerms[0].MatchExpressions[0].Values = []string{context.NodeID}
+
+	// status
+	status := v1alpha1.DeviceStatus{}
+	updateTwins := []v1alpha1.Twin{}
+	twin := v1alpha1.Twin{}
+	for key, value := range twins.Twin {
+		twin.PropertyName = key
+		twin.Reported.Value = *value.Actual.Value
+		updateTwins = append(updateTwins, twin)
+	}
+	status.Twins = updateTwins
+
+	payload, err := dttype.BuildDeviceInstabce(dttype.BuildBaseMessage(), device)
+	if err != nil {
+		return err
+		// handle build device state err
+	}
+	// $hw/events/devices/deviceID/create/membership/update
+	topic := dtcommon.DeviceETPrefix + deviceID + dtcommon.DeviceETCreateSuffix + dtcommon.MemETUpdateSuffix
+	context.Send(deviceID,
+		dtcommon.SendToEdge,
+		dtcommon.CommModule,
+		context.BuildModelMessage(modules.BusGroup, "", topic, "create", payload))
 }
 
 //DeviceUpdated update device attributes

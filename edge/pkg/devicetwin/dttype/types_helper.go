@@ -2,6 +2,7 @@ package dttype
 
 import (
 	"encoding/json"
+	"github.com/kubeedge/kubeedge/cloud/pkg/devicecontroller/apis/devices/v1alpha1"
 	"strings"
 	"time"
 
@@ -344,4 +345,17 @@ func BuildDeviceTwinDocument(baseMessage BaseMessage, twins map[string]*TwinDoc)
 		return []byte(""), false
 	}
 	return payload, true
+}
+
+type DeviceInstance struct {
+	BaseMessage
+	Device v1alpha1.Device
+}
+
+func BuildDeviceInstabce(baseMessage BaseMessage, device *v1alpha1.Device) ([]byte, error) {
+	payload, err := json.Marshal(DeviceInstance{BaseMessage{}, device})
+	if err != nil {
+		return []byte(""), err
+	}
+	return payload, nil
 }

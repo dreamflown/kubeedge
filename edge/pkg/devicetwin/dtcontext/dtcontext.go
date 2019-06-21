@@ -33,7 +33,8 @@ type DTContext struct {
 	DeviceMutex    *sync.Map
 	Mutex          *sync.Mutex
 	// DBConn *dtclient.Conn
-	State string
+	State      string
+	Attributes map[string]*dttype.MsgAttr
 }
 
 //InitDTContext init dtcontext

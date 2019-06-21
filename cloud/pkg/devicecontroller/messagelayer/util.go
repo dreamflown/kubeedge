@@ -33,8 +33,26 @@ func GetDeviceID(resource string) (string, error) {
 
 // GetResourceType returns the resourceType of message received from edge
 func GetResourceType(resource string) (string, error) {
+	// resource as below
+	// $hw/event/device/+/updated
+	// $hw/event/device/+/state/(update,get)
+	// $hw/event/device/+/node/+/membership/updated
+	// $hw/event/device/+/twin/edge_updated
 	if strings.Contains(resource, deviceconstants.ResourceTypeTwinEdgeUpdated) {
 		return deviceconstants.ResourceTypeTwinEdgeUpdated, nil
+	} else if strings.Contains(resource, deviceconstants.ResourceNode) {
+		return deviceconstants.ResourceNode, nil
+	} else if strings.Contains(resource, deviceconstants.ResourceDevice) {
+		return deviceconstants.ResourceDevice, nil
 	}
 	return "", errors.New("unknown resource")
+}
+
+// GetNodeID returns the nodeID of device create message received from edge
+func GetNodeID(resource string) (string, error) {
+	res := strings.Split(resource, "/")
+	if len(res) > deviceconstants.ResourceDeviceIDIndex+3 && res[deviceconstants.ResourceDeviceIndex] == deviceconstants.ResourceDevice && res[deviceconstants.ResourceDeviceIndex+2] == deviceconstants.ResourceDevice {
+		return res[deviceconstants.ResourceDeviceIndex+3], nil
+	}
+	return "", errors.New("failed to get device id and node id")
 }
